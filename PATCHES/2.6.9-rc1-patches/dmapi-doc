@@ -1,0 +1,46 @@
+Index: bk-2.6-d/Documentation/filesystems/xfs.txt
+===================================================================
+--- bk-2.6-d.orig/Documentation/filesystems/xfs.txt	2004-09-03 10:26:08.926755396 -0500
++++ bk-2.6-d/Documentation/filesystems/xfs.txt	2004-09-03 10:45:41.676723297 -0500
+@@ -29,6 +29,10 @@ When mounting an XFS filesystem, the fol
+ 	The preferred buffered I/O size can also be altered on an
+ 	individual file basis using the ioctl(2) system call.
+ 
++  dmapi
++	Enable the DMAPI (Data Management API) event callouts.
++	Use with the "mtpt" option.
++
+   ikeep/noikeep
+ 	When inode clusters are emptied of inodes, keep them around
+ 	on the disk (ikeep) - this is the traditional XFS behaviour
+@@ -62,6 +66,11 @@ When mounting an XFS filesystem, the fol
+ 	optional, and the log section can be separate from the data
+ 	section or contained within it.
+ 
++  mtpt=mountpoint
++	Use with the "dmapi" option.  The value specified here will be
++	included in the DMAPI mount event, and should be the path of
++	the actual mountpoint that is used.
++
+   noalign
+ 	Data allocations will not be aligned at stripe unit boundaries.
+ 
+Index: bk-2.6-d/MAINTAINERS
+===================================================================
+--- bk-2.6-d.orig/MAINTAINERS	2004-09-03 10:26:07.832813206 -0500
++++ bk-2.6-d/MAINTAINERS	2004-09-03 10:45:41.703721897 -0500
+@@ -2491,6 +2491,14 @@ L:	linux-xfs@oss.sgi.com
+ W:	http://oss.sgi.com/projects/xfs
+ S:	Supported
+ 
++DMAPI
++P:	Silicon Graphics Inc
++M:	xfs-masters@oss.sgi.com
++M:	roehrich@sgi.com
++L:	linux-xfs@oss.sgi.com
++W:	http://oss.sgi.com/projects/xfs
++S:	Supported
++
+ X86 3-LEVEL PAGING (PAE) SUPPORT
+ P:	Ingo Molnar
+ M:	mingo@redhat.com

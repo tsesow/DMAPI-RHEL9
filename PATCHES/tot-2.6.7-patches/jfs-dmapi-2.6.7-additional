@@ -1,0 +1,516 @@
+Index: 2.6.x-xfs-n/fs/jfs/Makefile
+===================================================================
+--- 2.6.x-xfs-n.orig/fs/jfs/Makefile
++++ 2.6.x-xfs-n/fs/jfs/Makefile
+@@ -3,7 +3,7 @@
+ #
+ 
+ ifeq ($(CONFIG_JFS_DMAPI),y)
+-	EXTRA_CFLAGS += -I$(TOPDIR)/fs/jfs -DDM_USE_SHASH
++	EXTRA_CFLAGS += -I$(TOPDIR)/fs/jfs -I$(TOPDIR)/fs/dmapi
+ endif
+ 
+ obj-$(CONFIG_JFS_FS) += jfs.o
+@@ -16,22 +16,6 @@
+ 
+ jfs-$(CONFIG_JFS_POSIX_ACL) += acl.o
+ 
+-jfs-$(CONFIG_JFS_DMAPI)	    += $(addprefix dmapi/, \
+-				dmapi_sysent.o \
+-				dmapi_attr.o \
+-				dmapi_config.o \
+-				dmapi_bulkattr.o \
+-				dmapi_dmattr.o \
+-				dmapi_event.o \
+-				dmapi_handle.o \
+-				dmapi_hole.o \
+-				dmapi_io.o \
+-				dmapi_mountinfo.o \
+-				dmapi_region.o \
+-				dmapi_register.o \
+-				dmapi_right.o \
+-				dmapi_session.o \
+-				dmapi_jfs.o \
+-				kmem.o)
++jfs-$(CONFIG_JFS_DMAPI)	    += dmapi/dmapi_jfs.o dmapi/kmem.o
+ 
+ EXTRA_CFLAGS += -D_JFS_4K
+Index: 2.6.x-xfs-n/fs/jfs/dmapi/dmapi_jfs.c
+===================================================================
+--- 2.6.x-xfs-n.orig/fs/jfs/dmapi/dmapi_jfs.c
++++ 2.6.x-xfs-n/fs/jfs/dmapi/dmapi_jfs.c
+@@ -44,7 +44,8 @@
+ #include <linux/ioctl.h>
+ #include <linux/ioctl32.h>
+ #endif
+-#include "dmapi_private.h"
++#include <dmapi.h>
++#include <dmapi_kern.h>
+ #include "jfs_debug.h"
+ #include "jfs_incore.h"
+ #include "jfs_filsys.h"
+@@ -52,6 +53,7 @@
+ #include "jfs_txnmgr.h"
+ #include "jfs_dmap.h"
+ #include "jfs_dmapi.h"
++#include "dmapi/kmem.h"
+ 
+ /* Here's what's left to be done:
+  * Figure out locktype in jfs_dm_send_data_event()
+@@ -574,7 +576,7 @@
+ {
+ 	struct inode	*ip;
+ 	dm_stat_t	*buf;
+-	jfs_handle_t	handle;
++	dm_handle_t	handle;
+ 	u_int		statstruct_sz;
+ 
+ 	buf = (dm_stat_t *)buffer;
+@@ -612,7 +614,7 @@
+ 		memcpy(buf+1, &handle, sizeof(handle));	/* handle follows stat struct */
+ 
+ 		buf->dt_handle.vd_offset = (int) sizeof(dm_stat_t);
+-		buf->dt_handle.vd_length = (unsigned int) JFS_HSIZE(handle);
++		buf->dt_handle.vd_length = (unsigned int) DM_HSIZE(handle);
+ 
+ 		statstruct_sz = (statstruct_sz+(DM_STAT_ALIGN-1)) & ~(DM_STAT_ALIGN-1);
+ 	} else {
+@@ -3305,8 +3307,8 @@
+ 
+ int
+ jfs_dm_get_fsys_vector(
+-	struct inode	*ip,
+-	caddr_t		addr)
++	struct super_block *sb,
++	void		*addr)
+ {
+ 	static	int		initialized = 0;
+ 	dm_fcntl_vector_t	*vecrq;
+@@ -3584,38 +3586,6 @@
+ };
+ #endif
+ 
+-void __init
+-jfs_dm_init(void)
+-{
+-#ifdef CONFIG_COMPAT
+-	unsigned int i;
+-	int err;
+-
+-	for (i = 0; i < ARRAY_SIZE(ioctl32_cmds); i++) {
+-		err = register_ioctl32_conversion(ioctl32_cmds[i].cmd, NULL);
+-		if (err >= 0)
+-			ioctl32_cmds[i].reg++;
+-		else
+-			printk(KERN_ERR "jfs_dm_init: unable to register ioctl %x, err = %d\n", ioctl32_cmds[i].cmd, err);
+-	}
+-#endif
+-}
+-
+-void __exit
+-jfs_dm_exit(void)
+-{
+-#ifdef CONFIG_COMPAT
+-	unsigned int i;
+-
+-	for (i = 0; i < ARRAY_SIZE(ioctl32_cmds); i++) {
+-		if (ioctl32_cmds[i].reg) {
+-			unregister_ioctl32_conversion(ioctl32_cmds[i].cmd);
+-			ioctl32_cmds[i].reg--;
+-		}
+-	}
+-#endif
+-}
+-
+ /*
+  * jfs_iget - called by DMAPI to get inode from file handle
+  */
+@@ -3623,7 +3593,7 @@
+ jfs_iget(
+ 	struct super_block *sbp,
+ 	struct inode	**ipp,
+-	fid_t		*fidp)
++	struct dm_fsfid	*fidp)
+ {
+ 	jfs_fid_t	*jfid;
+ 	struct inode 	*ip;
+@@ -3807,7 +3777,7 @@
+ {
+ 	struct jfs_sb_info *sbi = JFS_SBI(sb);
+ 	
+-	return JFS_SEND_NAMESP(DM_EVENT_PREUNMOUNT, sbi->dm_root, 
++	return JFS_SEND_PREUNMOUNT(sb, sbi->dm_root, 
+ 			DM_RIGHT_NULL, sbi->dm_root, DM_RIGHT_NULL,
+ 			NULL, NULL, 0, 0, 
+ 			((sbi->dm_evmask & (1<<DM_EVENT_PREUNMOUNT)) ?
+@@ -3839,3 +3809,86 @@
+ 		jfs_dm_preunmount(sb);
+ 	}
+ }
++
++static int
++jfs_dm_inode_to_fh(
++	struct inode		*ip,
++	struct dm_fsfid		*dmfsfid,
++	dm_fsid_t		*dmfsid)
++{
++	struct jfs_fid fid;
++	struct jfs_sb_info *sbi = JFS_SBI(ip->i_sb);
++	unsigned long ino;
++
++	if (sbi->dm_fsid == 0)
++		return(-EINVAL);
++
++	fid.fid_len = sizeof(jfs_fid_t) - sizeof(fid.fid_len);
++	fid.fid_pad = 0;
++	fid.fid_gen = ip->i_generation;
++	ino = ip->i_ino;
++	memcpy(&fid.fid_ino, &ino, sizeof(fid.fid_ino));
++
++	memcpy(dmfsid, &sbi->dm_fsid, sizeof(*dmfsid));
++	memcpy(dmfsfid, &fid, sizeof(*dmfsfid));
++
++	return 0;
++}
++
++static void
++jfs_dm_get_fsid(
++	struct super_block	*sb,
++	dm_fsid_t		*fsid)
++{
++	struct jfs_sb_info *sbi = JFS_SBI(sb);
++
++	memcpy(fsid, &sbi->dm_fsid, sizeof(*fsid));
++}
++
++
++/*
++ * Filesystem operations accessed by the DMAPI core.
++ */
++struct filesystem_dmapi_operations jfs_dmapiops = {
++	.get_fsys_vector	= jfs_dm_get_fsys_vector,
++	.fh_to_inode		= jfs_iget,
++	.inode_to_fh		= jfs_dm_inode_to_fh,
++	.get_fsid		= jfs_dm_get_fsid,
++};
++
++void __init
++jfs_dm_init(
++	struct file_system_type *fstype)
++{
++	dmapi_register(fstype, &jfs_dmapiops);
++#ifdef CONFIG_COMPAT
++	unsigned int i;
++	int err;
++
++	for (i = 0; i < ARRAY_SIZE(ioctl32_cmds); i++) {
++		err = register_ioctl32_conversion(ioctl32_cmds[i].cmd, NULL);
++		if (err >= 0)
++			ioctl32_cmds[i].reg++;
++		else
++			printk(KERN_ERR "jfs_dm_init: unable to register ioctl %x, err = %d\n", ioctl32_cmds[i].cmd, err);
++	}
++#endif
++}
++
++void __exit
++jfs_dm_exit(
++	struct file_system_type *fstype)
++{
++	dmapi_unregister(fstype);
++#ifdef CONFIG_COMPAT
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(ioctl32_cmds); i++) {
++		if (ioctl32_cmds[i].reg) {
++			unregister_ioctl32_conversion(ioctl32_cmds[i].cmd);
++			ioctl32_cmds[i].reg--;
++		}
++	}
++#endif
++}
++
+Index: 2.6.x-xfs-n/fs/jfs/dmapi/dmapi_jfs.h
+===================================================================
+--- 2.6.x-xfs-n.orig/fs/jfs/dmapi/dmapi_jfs.h
++++ 2.6.x-xfs-n/fs/jfs/dmapi/dmapi_jfs.h
+@@ -16,9 +16,6 @@
+  *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+  */
+ 
+-#include "sv.h"
+-#include "spin.h"
+-#include "kmem.h"
+ #include <asm/uaccess.h>
+ #include <linux/file.h>
+ #include <linux/fs.h>
+@@ -85,12 +82,120 @@
+         __u16	da_pad;         /* DMIG extra padding */
+ } dm_attrs_t;
+ 
+-int jfs_iget(
+-	struct super_block *sbp,
+-	struct inode	**ipp,
+-	fid_t		*fidp);
+ 
+ int jfs_dm_mount(struct super_block *sp);
+ int jfs_dm_preunmount(struct super_block *sp);
+ void jfs_dm_unmount(struct super_block *sp, int rc);
++
++#define DMATTR_PREFIXLEN	9
++
++/* Do you really want to allow the user to fiddle
++ * with the HSM's attributes?
++ */
++#define DMATTR_PREFIXSTRING	"user.dmi."
++
++#define DMATTR_PERS_REGIONS	"system.dmi.persistent.regions"
++
++/* events valid in dm_set_disp() when called with a filesystem handle. */
++
++#define DM_VALID_DISP_EVENTS		( \
++	(1 << DM_EVENT_PREUNMOUNT)	| \
++	(1 << DM_EVENT_UNMOUNT)		| \
++	(1 << DM_EVENT_NOSPACE)		| \
++	(1 << DM_EVENT_CREATE)		| \
++	(1 << DM_EVENT_POSTCREATE)	| \
++	(1 << DM_EVENT_REMOVE)		| \
++	(1 << DM_EVENT_POSTREMOVE)	| \
++	(1 << DM_EVENT_RENAME)		| \
++	(1 << DM_EVENT_POSTRENAME)	| \
++	(1 << DM_EVENT_LINK)		| \
++	(1 << DM_EVENT_POSTLINK)	| \
++	(1 << DM_EVENT_SYMLINK)		| \
++	(1 << DM_EVENT_POSTSYMLINK)	| \
++	(1 << DM_EVENT_READ)		| \
++	(1 << DM_EVENT_WRITE)		| \
++	(1 << DM_EVENT_TRUNCATE)	| \
++	(1 << DM_EVENT_ATTRIBUTE)	| \
++	(1 << DM_EVENT_CLOSE)		| \
++	(1 << DM_EVENT_DESTROY)		)
++
++#define DM_JFS_VALID_FS_EVENTS		( \
++	(1 << DM_EVENT_PREUNMOUNT)	| \
++	(1 << DM_EVENT_UNMOUNT)		| \
++	(1 << DM_EVENT_NOSPACE)		| \
++	(1 << DM_EVENT_CREATE)		| \
++	(1 << DM_EVENT_POSTCREATE)	| \
++	(1 << DM_EVENT_REMOVE)		| \
++	(1 << DM_EVENT_POSTREMOVE)	| \
++	(1 << DM_EVENT_RENAME)		| \
++	(1 << DM_EVENT_POSTRENAME)	| \
++	(1 << DM_EVENT_LINK)		| \
++	(1 << DM_EVENT_POSTLINK)	| \
++	(1 << DM_EVENT_SYMLINK)		| \
++	(1 << DM_EVENT_POSTSYMLINK)	| \
++	(1 << DM_EVENT_ATTRIBUTE)	| \
++	(1 << DM_EVENT_CLOSE)		| \
++	(1 << DM_EVENT_DESTROY)		)
++
++/* Events valid in dm_set_eventlist() when called with a file handle for
++   a regular file or a symlink.	 These events are persistent.
++*/
++
++#define DM_JFS_VALID_FILE_EVENTS	( \
++	(1 << DM_EVENT_ATTRIBUTE)	| \
++	(1 << DM_EVENT_CLOSE)		| \
++	(1 << DM_EVENT_DESTROY)		)
++	
++/* Events valid in dm_set_region().  These events are persistent.
++*/
++
++#define DM_JFS_VALID_REGION_EVENTS	( \
++	(1 << DM_EVENT_READ)		| \
++	(1 << DM_EVENT_WRITE)		| \
++	(1 << DM_EVENT_TRUNCATE)	)
++
++/* Events valid in dm_set_eventlist() when called with a file handle for
++   a directory.	 These events are persistent.
++*/
++
++#define DM_JFS_VALID_DIRECTORY_EVENTS	( \
++	(1 << DM_EVENT_CREATE)		| \
++	(1 << DM_EVENT_POSTCREATE)	| \
++	(1 << DM_EVENT_REMOVE)		| \
++	(1 << DM_EVENT_POSTREMOVE)	| \
++	(1 << DM_EVENT_RENAME)		| \
++	(1 << DM_EVENT_POSTRENAME)	| \
++	(1 << DM_EVENT_LINK)		| \
++	(1 << DM_EVENT_POSTLINK)	| \
++	(1 << DM_EVENT_SYMLINK)		| \
++	(1 << DM_EVENT_POSTSYMLINK)	| \
++	(1 << DM_EVENT_ATTRIBUTE)	| \
++	(1 << DM_EVENT_CLOSE)		| \
++	(1 << DM_EVENT_DESTROY)		)
++
++/* Events supported by the JFS filesystem. */
++#define DM_JFS_SUPPORTED_EVENTS		( \
++	(1 << DM_EVENT_MOUNT)		| \
++	(1 << DM_EVENT_PREUNMOUNT)	| \
++	(1 << DM_EVENT_UNMOUNT)		| \
++	(1 << DM_EVENT_NOSPACE)		| \
++	(1 << DM_EVENT_CREATE)		| \
++	(1 << DM_EVENT_POSTCREATE)	| \
++	(1 << DM_EVENT_REMOVE)		| \
++	(1 << DM_EVENT_POSTREMOVE)	| \
++	(1 << DM_EVENT_RENAME)		| \
++	(1 << DM_EVENT_POSTRENAME)	| \
++	(1 << DM_EVENT_LINK)		| \
++	(1 << DM_EVENT_POSTLINK)	| \
++	(1 << DM_EVENT_SYMLINK)		| \
++	(1 << DM_EVENT_POSTSYMLINK)	| \
++	(1 << DM_EVENT_READ)		| \
++	(1 << DM_EVENT_WRITE)		| \
++	(1 << DM_EVENT_TRUNCATE)	| \
++	(1 << DM_EVENT_ATTRIBUTE)	| \
++	(1 << DM_EVENT_CLOSE)		| \
++	(1 << DM_EVENT_DESTROY)		| \
++	(1 << DM_EVENT_USER)		)
++
++
+ #endif
+Index: 2.6.x-xfs-n/fs/jfs/dmapi/dmapi_kern.h
+===================================================================
+--- 2.6.x-xfs-n.orig/fs/jfs/dmapi/dmapi_kern.h
++++ 2.6.x-xfs-n/fs/jfs/dmapi/dmapi_kern.h
+@@ -1,3 +1,4 @@
++#error NOT HERE
+ /*
+  * Copyright (c) 2000-2002 Silicon Graphics, Inc.  All Rights Reserved.
+  *
+Index: 2.6.x-xfs-n/fs/jfs/dmapi/dmapi_private.h
+===================================================================
+--- 2.6.x-xfs-n.orig/fs/jfs/dmapi/dmapi_private.h
++++ 2.6.x-xfs-n/fs/jfs/dmapi/dmapi_private.h
+@@ -1,3 +1,4 @@
++#error NOT HERE
+ /*
+  * Copyright (c) 2000-2003 Silicon Graphics, Inc.  All Rights Reserved.
+  *
+Index: 2.6.x-xfs-n/fs/jfs/dmapi/jfsdmapi.h
+===================================================================
+--- 2.6.x-xfs-n.orig/fs/jfs/dmapi/jfsdmapi.h
++++ 2.6.x-xfs-n/fs/jfs/dmapi/jfsdmapi.h
+@@ -1,3 +1,4 @@
++#error NOT HERE
+ /*
+  * Copyright (c) 1995-2003 Silicon Graphics, Inc.  All Rights Reserved.
+  *
+Index: 2.6.x-xfs-n/fs/jfs/dmapi/sv.h
+===================================================================
+--- 2.6.x-xfs-n.orig/fs/jfs/dmapi/sv.h
++++ 2.6.x-xfs-n/fs/jfs/dmapi/sv.h
+@@ -1,3 +1,4 @@
++#error NOT HERE
+ /*
+  * Copyright (c) 2000-2002 Silicon Graphics, Inc.  All Rights Reserved.
+  * Portions Copyright (c) 2002 Christoph Hellwig.  All Rights Reserved.
+Index: 2.6.x-xfs-n/fs/jfs/jfs_dmapi.h
+===================================================================
+--- 2.6.x-xfs-n.orig/fs/jfs/jfs_dmapi.h
++++ 2.6.x-xfs-n/fs/jfs/jfs_dmapi.h
+@@ -32,6 +32,9 @@
+ #ifndef __JFS_DMAPI_H__
+ #define __JFS_DMAPI_H__
+ 
++#include <dmapi.h>
++#include <dmapi_kern.h>
++
+ /*	Values used to define the on-disk version of dm_attrname_t. All
+  *	on-disk attribute names start with the 8-byte string "app.dmi.".
+  *
+@@ -63,18 +66,12 @@
+ 			DM_FLAGS_NDELAY : 0)
+ 
+ 
+-extern int dmapi_init(void);
+-extern void dmapi_uninit(void);
++extern void jfs_dm_init(struct file_system_type *fstype);
++extern void jfs_dm_exit(struct file_system_type *fstype);
+ 
+ int	jfs_dm_send_data_event(int, struct inode *,
+ 			dm_off_t, size_t, int, int /*vrwlock_t*/ *);
+ int	jfs_dm_send_mmap_event(struct vm_area_struct *, unsigned int);
+-int	dm_send_destroy_event(struct inode *, dm_right_t);
+-int	dm_send_namesp_event(dm_eventtype_t, struct inode *,
+-			dm_right_t, struct inode *, dm_right_t,
+-			char *, char *, mode_t, int, int);
+-void	dm_send_unmount_event(struct super_block *, struct inode *,
+-			dm_right_t, mode_t, int, int);
+ 
+ #define JFS_SEND_DATA(ev,ip,off,len,fl,lock) \
+ 	jfs_dm_send_data_event(ev,ip,off,len,fl,lock)
+@@ -83,7 +80,9 @@
+ #define JFS_SEND_DESTROY(ip,right) \
+ 	dm_send_destroy_event(ip,right)
+ #define JFS_SEND_NAMESP(ev,i1,r1,i2,r2,n1,n2,mode,rval,fl) \
+-	dm_send_namesp_event(ev,i1,r1,i2,r2,n1,n2,mode,rval,fl)
++	dm_send_namesp_event(ev,NULL,i1,r1,i2,r2,n1,n2,mode,rval,fl)
++#define JFS_SEND_PREUNMOUNT(sb,i1,r1,i2,r2,n1,n2,mode,rval,fl) \
++	dm_send_namesp_event(DM_EVENT_PREUNMOUNT,sb,i1,r1,i2,r2,n1,n2,mode,rval,fl)
+ #define JFS_SEND_UNMOUNT(sbp,ip,right,mode,rval,fl) \
+ 	dm_send_unmount_event(sbp,ip,right,mode,rval,fl)
+ 
+Index: 2.6.x-xfs-n/fs/jfs/jfs_incore.h
+===================================================================
+--- 2.6.x-xfs-n.orig/fs/jfs/jfs_incore.h
++++ 2.6.x-xfs-n/fs/jfs/jfs_incore.h
+@@ -27,7 +27,7 @@
+ #include "jfs_dtree.h"
+ #ifdef CONFIG_JFS_DMAPI
+ #include "jfs_filsys.h"
+-#include "dmapi/jfsdmapi.h"		/* for dm_region_t */
++#include <dmapi.h>		/* for dm_region_t */
+ #include "dmapi/dmapi_jfs.h"		/* for dm_attrs_t */
+ #endif
+ 
+Index: 2.6.x-xfs-n/fs/jfs/jfs_xtree.c
+===================================================================
+--- 2.6.x-xfs-n.orig/fs/jfs/jfs_xtree.c
++++ 2.6.x-xfs-n/fs/jfs/jfs_xtree.c
+@@ -27,6 +27,7 @@
+ #include "jfs_dinode.h"
+ #include "jfs_superblock.h"
+ #include "jfs_debug.h"
++#include "dmapi/kmem.h"
+ 
+ /*
+  * xtree local flag
+Index: 2.6.x-xfs-n/fs/jfs/super.c
+===================================================================
+--- 2.6.x-xfs-n.orig/fs/jfs/super.c
++++ 2.6.x-xfs-n/fs/jfs/super.c
+@@ -757,11 +757,7 @@
+ #endif
+ 
+ #ifdef CONFIG_JFS_DMAPI
+-	rc = dmapi_init();
+-	if (rc) {
+-		jfs_err("init_jfs_fs: dmapi_init failed w/rc = %d", rc);
+-		goto kill_committask;
+-	}
++	jfs_dm_init(&jfs_fs_type);
+ #endif	
+ 
+ 	return register_filesystem(&jfs_fs_type);
+@@ -803,7 +799,7 @@
+ 	jfs_proc_clean();
+ #endif
+ #ifdef CONFIG_JFS_DMAPI
+-	dmapi_uninit();
++	jfs_dm_exit(&jfs_fs_type);
+ #endif	
+ 	unregister_filesystem(&jfs_fs_type);
+ 	kmem_cache_destroy(jfs_inode_cachep);
+Index: 2.6.x-xfs-n/fs/Kconfig
+===================================================================
+--- 2.6.x-xfs-n.orig/fs/Kconfig
++++ 2.6.x-xfs-n/fs/Kconfig
+@@ -281,6 +281,7 @@
+ config JFS_FS
+ 	tristate "JFS filesystem support"
+ 	select NLS
++	select DMAPI if JFS_DMAPI
+ 	help
+ 	  This is a port of IBM's Journaled Filesystem .  More information is
+ 	  available in the file Documentation/filesystems/jfs.txt.

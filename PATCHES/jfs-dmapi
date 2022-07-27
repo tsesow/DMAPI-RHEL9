@@ -1,0 +1,44 @@
+June 8, 2004
+
+To make this version of dmapi work with JFS you'll first
+need the JFS dmapi patch then add the corresponding jfs-dmapi-*-additional
+patch from this directory.
+
+The JFS dmapi patches can be found at IBM's website.  Their patch will make
+JFS dmapi-capable, and will include a JFS-specific version of the dmapi core
+in fs/jfs/dmapi:
+
+http://www-124.ibm.com/developer/opensource/jfs/project/pub/dmapi/
+
+Then, from this fs/dmapi/PATCHES directory add on the corresponding
+jfs-dmapi-*-additional patch.  This patch will convert JFS to use this unified
+version of DMAPI.  [Note, this assumes you are using SGI's XFS kernel tree at
+http://oss.sgi.com/cgi-bin/cvsweb.cgi/linux-2.6-xfs/]
+
+Then use the same libdm that you use with your XFS dmapi applications.  You
+should have libdm from dmapi-2.2.0 or later.
+
+With these patches this unified DMAPI can manage XFS and JFS filesystems at
+the same time, however SGI has not tested JFS with DMAPI.
+
+
+June 25, 2004
+
+The patch jfs-dmapi-2.6.7-additional applies to the 2.6.7 xfs linux kernel
+tree on oss.sgi.com, on top of IBM's dmapi patch named jfs-dmapi-2.6.7-rc1 .
+Get IBM's patch from the usual place.
+
+
+July 13, 2004
+
+The patches under the tot-2.6.7-patches directory can be used to add dmapi to
+the current top-of-tree Linux 2.6 kernel as it is found in BK at
+http://linux.bkbits.net:8080/linux-2.5.  You still need IBM's dmapi patch from
+their website (mentioned above).
+
+September 7, 2004
+
+The patches under the 2.6.9-rc1-patches directory can be used to add dmapi to
+the current top-of-tree Linux 2.6 kernel as it is found in BK at
+http://linux.bkbits.net:8080/linux-2.5.  You still need IBM's dmapi patch from
+their website (mentioned above).

@@ -1,0 +1,23 @@
+ Makefile |    5 ++++-
+ 1 files changed, 4 insertions(+), 1 deletion(-)
+
+Index: bk-2.6-d/fs/xfs/Makefile
+===================================================================
+--- bk-2.6-d.orig/fs/xfs/Makefile	2004-09-03 10:27:00.944005721 -0500
++++ bk-2.6-d/fs/xfs/Makefile	2004-09-03 10:49:19.703371085 -0500
+@@ -51,6 +51,9 @@ ifeq ($(CONFIG_XFS_TRACE),y)
+ 	EXTRA_CFLAGS += -DPAGEBUF_TRACE
+ 	# EXTRA_CFLAGS += -DXFS_VNODE_TRACE
+ endif
++ifeq ($(CONFIG_XFS_DMAPI),y)
++	EXTRA_CFLAGS += -I $(TOPDIR)/fs/dmapi
++endif
+ 
+ obj-$(CONFIG_XFS_FS)		+= xfs.o
+ 
+@@ -148,4 +151,4 @@ xfs-y				+= $(addprefix support/, \
+ 				   uuid.o)
+ 
+ xfs-$(CONFIG_XFS_TRACE)		+= support/ktrace.o
+-
++xfs-$(CONFIG_XFS_DMAPI)		+= xfs_dmapi.o

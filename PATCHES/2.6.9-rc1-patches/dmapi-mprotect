@@ -1,0 +1,29 @@
+Index: bk-2.6-d/include/linux/mm.h
+===================================================================
+--- bk-2.6-d.orig/include/linux/mm.h	2004-09-03 10:27:09.843535145 -0500
++++ bk-2.6-d/include/linux/mm.h	2004-09-03 10:45:34.649087582 -0500
+@@ -175,6 +175,8 @@ struct vm_operations_struct {
+ 	void (*close)(struct vm_area_struct * area);
+ 	struct page * (*nopage)(struct vm_area_struct * area, unsigned long address, int *type);
+ 	int (*populate)(struct vm_area_struct * area, unsigned long address, unsigned long len, pgprot_t prot, unsigned long pgoff, int nonblock);
++#define HAVE_VMOP_MPROTECT
++	int (*mprotect)(struct vm_area_struct * area, unsigned int newflags);
+ #ifdef CONFIG_NUMA
+ 	int (*set_policy)(struct vm_area_struct *vma, struct mempolicy *new);
+ 	struct mempolicy *(*get_policy)(struct vm_area_struct *vma,
+Index: bk-2.6-d/mm/mprotect.c
+===================================================================
+--- bk-2.6-d.orig/mm/mprotect.c	2004-09-03 10:27:14.895266298 -0500
++++ bk-2.6-d/mm/mprotect.c	2004-09-03 10:45:34.667086649 -0500
+@@ -265,6 +265,11 @@ sys_mprotect(unsigned long start, size_t
+ 		if (error)
+ 			goto out;
+ 
++		if (vma->vm_ops && vma->vm_ops->mprotect) {
++			error = vma->vm_ops->mprotect(vma, newflags);
++			if (error < 0)
++				goto out;
++		}
+ 		tmp = vma->vm_end;
+ 		if (tmp > end)
+ 			tmp = end;

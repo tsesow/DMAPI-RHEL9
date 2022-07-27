@@ -1,0 +1,9 @@
+Index: bk-2.6-d/mm/prio_tree.c
+===================================================================
+--- bk-2.6-d.orig/mm/prio_tree.c	2004-09-03 10:27:15.039258553 -0500
++++ bk-2.6-d/mm/prio_tree.c	2004-09-03 10:45:45.980500149 -0500
+@@ -654,3 +654,4 @@ struct vm_area_struct *vma_prio_tree_nex
+ 	} else
+ 		return NULL;
+ }
++EXPORT_SYMBOL(vma_prio_tree_next);

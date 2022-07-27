@@ -1,0 +1,154 @@
+%patch
+Index: 2.6.x-xfs/Documentation/filesystems/xfs.txt
+===================================================================
+--- 2.6.x-xfs.orig/Documentation/filesystems/xfs.txt	Thu Jun 17 11:34:18 2004
++++ 2.6.x-xfs/Documentation/filesystems/xfs.txt	Sun Jun 20 13:00:45 2004
+@@ -29,6 +29,10 @@
+ 	The preferred buffered I/O size can also be altered on an
+ 	individual file basis using the ioctl(2) system call.
+ 
++  dmapi
++	Enable the DMAPI (Data Management API) event callouts.
++	Use with the "mtpt" option.
++
+   ikeep/noikeep
+ 	When inode clusters are emptied of inodes, keep them around
+ 	on the disk (ikeep) - this is the traditional XFS behaviour
+@@ -62,6 +66,11 @@
+ 	optional, and the log section can be separate from the data
+ 	section or contained within it.
+ 
++  mtpt=mountpoint
++	Use with the "dmapi" option.  The value specified here will be
++	included in the DMAPI mount event, and should be the path of
++	the actual mountpoint that is used.
++
+   noalign
+ 	Data allocations will not be aligned at stripe unit boundaries.
+ 
+Index: 2.6.x-xfs/MAINTAINERS
+===================================================================
+--- 2.6.x-xfs.orig/MAINTAINERS	Thu Jun 17 11:34:18 2004
++++ 2.6.x-xfs/MAINTAINERS	Thu Jun 17 12:25:04 2004
+@@ -2362,6 +2362,14 @@
+ W:	http://oss.sgi.com/projects/xfs
+ S:	Supported
+ 
++DMAPI
++P:	Silicon Graphics Inc
++M:	xfs-masters@oss.sgi.com
++M:	roehrich@sgi.com
++L:	linux-xfs@oss.sgi.com
++W:	http://oss.sgi.com/projects/xfs
++S:	Supported
++
+ X86 3-LEVEL PAGING (PAE) SUPPORT
+ P:	Ingo Molnar
+ M:	mingo@redhat.com
+Index: 2.6.x-xfs/fs/Kconfig
+===================================================================
+--- 2.6.x-xfs.orig/fs/Kconfig	Thu Jun 17 12:23:48 2004
++++ 2.6.x-xfs/fs/Kconfig	Thu Jun 17 12:39:05 2004
+@@ -327,6 +327,7 @@
+ 
+ config XFS_FS
+ 	tristate "XFS filesystem support"
++	select DMAPI if XFS_DMAPI
+ 	help
+ 	  XFS is a high performance journaling filesystem which originated
+ 	  on the SGI IRIX platform.  It is completely multi-threaded, can
+@@ -378,6 +379,19 @@
+ 	  with or without the generic quota support enabled (CONFIG_QUOTA) -
+ 	  they are completely independent subsystems.
+ 
++config XFS_DMAPI
++	bool "DMAPI support"
++	depends on XFS_FS
++	help
++	  The Data Management API is a system interface used to implement
++	  the interface defined in the X/Open document:
++	  "Systems Management: Data Storage Management (XDSM) API",
++	  dated February 1997.  This interface is used by hierarchical
++	  storage management systems.
++	  You should enable generic DMAPI support for this.
++
++	  If unsure, say N.
++
+ config XFS_SECURITY
+ 	bool "Security Label support"
+ 	depends on XFS_FS
+@@ -460,6 +474,25 @@
+ 	  If you don't know whether you need it, then you don't need it:
+ 	  answer N.
+ 
++config DMAPI
++	tristate "DMAPI support"
++	help
++	  The Data Management API is a system interface used to implement
++	  the interface defined in the X/Open document:
++	  "Systems Management: Data Storage Management (XDSM) API",
++	  dated February 1997.  This interface is used by hierarchical
++	  storage management systems.
++
++	  If any DMAPI-capable filesystem is built into the kernel, then
++	  DMAPI must also be built into the kernel.
++
++config DMAPI_DEBUG
++	bool "DMAPI debugging support"
++	depends on DMAPI
++	help
++	  If you don't know whether you need it, then you don't need it:
++	  answer N.
++
+ config QUOTA
+ 	bool "Quota support"
+ 	help
+Index: 2.6.x-xfs/fs/Makefile
+===================================================================
+--- 2.6.x-xfs.orig/fs/Makefile	Thu Jun 17 11:34:22 2004
++++ 2.6.x-xfs/fs/Makefile	Thu Jun 17 12:25:29 2004
+@@ -89,5 +89,6 @@
+ obj-$(CONFIG_SUN_OPENPROMFS)	+= openpromfs/
+ obj-$(CONFIG_JFS_FS)		+= jfs/
+ obj-$(CONFIG_XFS_FS)		+= xfs/
++obj-$(CONFIG_DMAPI)		+= dmapi/
+ obj-$(CONFIG_AFS_FS)		+= afs/
+ obj-$(CONFIG_BEFS_FS)		+= befs/
+Index: 2.6.x-xfs/include/linux/mm.h
+===================================================================
+--- 2.6.x-xfs.orig/include/linux/mm.h	Thu Jun 17 11:34:23 2004
++++ 2.6.x-xfs/include/linux/mm.h	Thu Jun 17 12:28:14 2004
+@@ -168,6 +168,8 @@
+ 	void (*close)(struct vm_area_struct * area);
+ 	struct page * (*nopage)(struct vm_area_struct * area, unsigned long address, int *type);
+ 	int (*populate)(struct vm_area_struct * area, unsigned long address, unsigned long len, pgprot_t prot, unsigned long pgoff, int nonblock);
++#define HAVE_VMOP_MPROTECT
++	int (*mprotect)(struct vm_area_struct * area, unsigned int newflags);
+ #ifdef CONFIG_NUMA
+ 	int (*set_policy)(struct vm_area_struct *vma, struct mempolicy *new);
+ 	struct mempolicy *(*get_policy)(struct vm_area_struct *vma,
+Index: 2.6.x-xfs/mm/mprotect.c
+===================================================================
+--- 2.6.x-xfs.orig/mm/mprotect.c	Thu Jun 17 11:34:23 2004
++++ 2.6.x-xfs/mm/mprotect.c	Thu Jun 17 12:31:09 2004
+@@ -257,6 +257,11 @@
+ 		if (error)
+ 			goto out;
+ 
++		if (vma->vm_ops && vma->vm_ops->mprotect) {
++			error = vma->vm_ops->mprotect(vma, newflags);
++			if (error < 0)
++				goto out;
++		}
+ 		tmp = vma->vm_end;
+ 		if (tmp > end)
+ 			tmp = end;
+Index: 2.6.x-xfs/mm/prio_tree.c
+===================================================================
+--- 2.6.x-xfs.orig/mm/prio_tree.c	Thu Jun 17 11:33:22 2004
++++ 2.6.x-xfs/mm/prio_tree.c	Sun Jun 20 13:01:54 2004
+@@ -661,3 +661,4 @@
+ 	} else
+ 		return NULL;
+ }
++EXPORT_SYMBOL(vma_prio_tree_next);

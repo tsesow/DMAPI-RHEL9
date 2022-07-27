@@ -1,0 +1,70 @@
+Index: bk-2.6-d/fs/Kconfig
+===================================================================
+--- bk-2.6-d.orig/fs/Kconfig	2004-09-03 10:26:53.023424500 -0500
++++ bk-2.6-d/fs/Kconfig	2004-09-03 10:45:49.698307348 -0500
+@@ -294,6 +294,7 @@ config FS_POSIX_ACL
+ 
+ config XFS_FS
+ 	tristate "XFS filesystem support"
++	select DMAPI if XFS_DMAPI
+ 	help
+ 	  XFS is a high performance journaling filesystem which originated
+ 	  on the SGI IRIX platform.  It is completely multi-threaded, can
+@@ -345,6 +346,19 @@ config XFS_QUOTA
+ 	  with or without the generic quota support enabled (CONFIG_QUOTA) -
+ 	  they are completely independent subsystems.
+ 
++config XFS_DMAPI
++	bool "DMAPI support"
++	depends on XFS_FS
++	help
++	  The Data Management API is a system interface used to implement
++	  the interface defined in the X/Open document:
++	  "Systems Management: Data Storage Management (XDSM) API",
++	  dated February 1997.  This interface is used by hierarchical
++	  storage management systems.
++	  You should enable generic DMAPI support for this.
++
++	  If unsure, say N.
++
+ config XFS_SECURITY
+ 	bool "Security Label support"
+ 	depends on XFS_FS
+@@ -402,6 +416,25 @@ config ROMFS_FS
+ 	  If you don't know whether you need it, then you don't need it:
+ 	  answer N.
+ 
++config DMAPI
++	tristate "DMAPI support"
++	help
++	  The Data Management API is a system interface used to implement
++	  the interface defined in the X/Open document:
++	  "Systems Management: Data Storage Management (XDSM) API",
++	  dated February 1997.  This interface is used by hierarchical
++	  storage management systems.
++
++	  If any DMAPI-capable filesystem is built into the kernel, then
++	  DMAPI must also be built into the kernel.
++
++config DMAPI_DEBUG
++	bool "DMAPI debugging support"
++	depends on DMAPI
++	help
++	  If you don't know whether you need it, then you don't need it:
++	  answer N.
++
+ config QUOTA
+ 	bool "Quota support"
+ 	help
+Index: bk-2.6-d/fs/Makefile
+===================================================================
+--- bk-2.6-d.orig/fs/Makefile	2004-09-03 10:26:53.277411072 -0500
++++ bk-2.6-d/fs/Makefile	2004-09-03 10:45:49.711306674 -0500
+@@ -89,6 +89,7 @@ obj-$(CONFIG_UDF_FS)		+= udf/
+ obj-$(CONFIG_SUN_OPENPROMFS)	+= openpromfs/
+ obj-$(CONFIG_JFS_FS)		+= jfs/
+ obj-$(CONFIG_XFS_FS)		+= xfs/
++obj-$(CONFIG_DMAPI)		+= dmapi/
+ obj-$(CONFIG_AFS_FS)		+= afs/
+ obj-$(CONFIG_BEFS_FS)		+= befs/
+ obj-$(CONFIG_HOSTFS)		+= hostfs/

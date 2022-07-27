@@ -1,0 +1,19 @@
+
+The patches in this directory apply against the latest Linux 2.6 community
+kernel to give it the unified DMAPI that works with both XFS and JFS.
+
+This is considered experimental, and SGI does not test or support JFS with
+DMAPI.
+
+The bk repository for the latest Linux 2.6 community kernel is at
+http://linux.bkbits.net:8080/linux-2.5
+
+These patches were tested on Linux 2.6.7, from the bk repository as of:
+ July 8, 2004
+
+This requires IBM's DMAPI patch, a copy of which has been provided here as a
+convenience to anyone wanting to try out this code.  Their patch is named
+jfs-dmapi-2.6.7-rc1.patch here, and was obtained from their website at
+http://www-124.ibm.com/developer/opensource/jfs/project/pub/dmapi/
+
+The 'series' file indicates the order in which the patches should be applied.
